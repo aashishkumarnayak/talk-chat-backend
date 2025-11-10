@@ -1,45 +1,50 @@
-# Use official PHP with Apache
+# Use the official PHP image with Apache
 FROM php:8.2-apache
 
-# Set working directory inside the container
+# Set working directory inside container
 WORKDIR /var/www/html
 
-# Install required system dependencies and PHP extensions
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
-    zip \
+    git \
     unzip \
+    zip \
     libpng-dev \
     libjpeg-dev \
     libfreetype6-dev \
     libonig-dev \
-    libzip-dev \
-    && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install pdo pdo_mysql mbstring zip exif pcntl gd \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    libxml2-dev \
+    curl \
+    && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd
 
-# Copy all project files to container
-COPY . .
-
-# Install Composer globally
-RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" \
-    && php composer-setup.php --install-dir=/usr/local/bin --filename=composer \
-    && rm composer-setup.php
-
-# Install PHP dependencies
-RUN composer install --no-dev --optimize-autoloader --no-interaction
-
-# Enable Apache mod_rewrite for Laravel routes
+# Enable Apache mod_rewrite
 RUN a2enmod rewrite
 
-# Set Apache DocumentRoot to Laravel’s public folder
-RUN sed -i 's|DocumentRoot /var/www/html|DocumentRoot /var/www/html/public|g' /etc/apache2/sites-available/000-default.conf
+# Copy composer from the composer image (avoids installing globally)
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-# Set permissions for Laravel storage and cache
+# Copy Laravel project files
+COPY . .
+
+# ✅ Copy your .env file before running composer or artisan commands
+# Make sure .env exists in your repo root
+COPY .env /var/www/html/.env
+
+# Install dependencies
+RUN composer install --no-interaction --prefer-dist --optimize-autoloader
+
+# Set correct permissions for storage and cache
 RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache \
     && chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
 
-# Expose port 80 for Render
+# Set Apache document root to Laravel's public folder
+RUN sed -i 's|DocumentRoot /var/www/html|DocumentRoot /var/www/html/public|g' /etc/apache2/sites-available/000-default.conf
+
+# Expose port 80
 EXPOSE 80
 
-# Generate key and start Apache
-CMD php artisan key:generate --force && apache2-foreground
+# Generate application key (only if not already set)
+RUN php artisan key:generate --ansi || true
+
+# Start Apache server
+CMD ["apache2-foreground"]
