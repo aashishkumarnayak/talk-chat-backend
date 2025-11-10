@@ -1,44 +1,43 @@
 # Use official PHP image with Apache
 FROM php:8.2-apache
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    git \
-    curl \
-    libpng-dev \
-    libonig-dev \
-    libxml2-dev \
-    zip \
-    unzip \
-    && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd
+# Set working directory inside container
+WORKDIR /var/www/html
 
-# Enable Apache rewrite module (needed for Laravel routing)
-RUN a2enmod rewrite
-
-# Set working directory
-WORKDIR /var/www/html/public
-
-# Copy composer and install dependencies
-COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
-
-# Copy all files
+# Copy all project files into the container
 COPY . .
 
-# Install PHP dependencies
-RUN composer install --no-dev --optimize-autoloader
+# Install required system packages and PHP extensions
+RUN apt-get update && apt-get install -y \
+    zip \
+    unzip \
+    libpng-dev \
+    libjpeg-dev \
+    libfreetype6-dev \
+    oniguruma-dev \
+    libzip-dev \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install pdo pdo_mysql mbstring zip exif pcntl gd
 
-# Set permissions for Laravel storage and cache
-RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
-RUN chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
+# Enable Apache mod_rewrite (for Laravel routing)
+RUN a2enmod rewrite
 
-# Copy environment example
-COPY .env.example .env
+# Set Apache DocumentRoot to Laravel's public directory
+RUN sed -i 's|DocumentRoot /var/www/html|DocumentRoot /var/www/html/public|g' /etc/apache2/sites-available/000-default.conf
 
-# Generate application key (optional if done manually)
-RUN php artisan key:generate
+# Set proper permissions for Laravel storage and cache
+RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache \
+    && chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
 
-# Expose port 80 for web traffic
+# Expose port 80 to Render
 EXPOSE 80
 
-# Start Apache
-CMD ["apache2-foreground"]
+# Run Composer to install dependencies
+# (If composer.json exists, install dependencies)
+RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" \
+    && php composer-setup.php --install-dir=/usr/local/bin --filename=composer \
+    && composer install --no-dev --optimize-autoloader --no-interaction
+
+# Generate Laravel key (Render can handle this via environment)
+# CMD below ensures key is generated on first start if missing
+CMD php artisan key:generate --force && apache2-foreground
